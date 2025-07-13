@@ -543,6 +543,13 @@ if (colDiff === 1 && rowDiff === direction && targetPiece) {
         const piece = this.board[fromRow][fromCol];
         const capturedPiece = this.board[toRow][toCol];
         
+        // 폰 승진 확인 (킹을 잡지 않은 경우에만)
+        if (this.isPawnPromotion(toRow, toCol, piece) && !this.isKingCaptured(this.currentPlayer === 'white' ? 'black' : 'white')) {
+            // 폰 승진 시에는 executeMove를 호출하지 않고 승진 다이얼로그에서 완전히 처리
+            this.promotePawn(toRow, toCol);
+            return; // 여기서 함수 종료, 서버 전송은 승진 완료 후에 수행
+        }
+        
         // 특별한 이동 처리
         const specialType = this.getSpecialMoveType(fromRow, fromCol, toRow, toCol, piece);
         
@@ -554,14 +561,6 @@ if (colDiff === 1 && rowDiff === direction && targetPiece) {
             this.executeMove(fromRow, fromCol, toRow, toCol, piece, capturedPiece, specialType);
         } else {
             this.executeMove(fromRow, fromCol, toRow, toCol, piece, capturedPiece, specialType);
-        }
-        
-        // 폰 승진 확인 (킹을 잡지 않은 경우에만)
-        if (this.isPawnPromotion(toRow, toCol, piece) && !this.isKingCaptured(this.currentPlayer === 'white' ? 'black' : 'white')) {
-            // 폰 승진 시에는 승진 다이얼로그가 완료될 때까지 서버 전송을 하지 않음
-            // 승진 다이얼로그에서 승진 완료 후 sendMoveToGitHub()를 호출할 예정
-            this.promotePawn(toRow, toCol);
-            return; // 여기서 함수 종료, 서버 전송은 승진 완료 후에 수행
         }
         
         // 선택 해제 및 하이라이트 제거
@@ -2957,12 +2956,12 @@ if (colDiff === 1 && rowDiff === direction && targetPiece) {
         
         console.log(`폰 승진: ${color} 폰이 승진합니다`);
         
-        // 승진 선택 UI 표시
-        this.showPromotionDialog(row, col, color);
+        // 승진 선택 UI 표시 - 원래 위치도 전달
+        this.showPromotionDialog(row, col, color, this.selectedPiece ? this.selectedPiece.row : null, this.selectedPiece ? this.selectedPiece.col : null);
     }
 
     // 승진 선택 다이얼로그 표시
-    showPromotionDialog(row, col, color) {
+    showPromotionDialog(row, col, color, fromRow, fromCol) {
         const pieces = color === 'white' ? ['♕', '♖', '♗', '♘'] : ['♛', '♜', '♝', '♞'];
         const pieceNames = ['퀸', '룩', '비숍', '나이트'];
         
@@ -2992,40 +2991,76 @@ if (colDiff === 1 && rowDiff === direction && targetPiece) {
         
         document.body.appendChild(dialog);
         
-        // 클릭 이벤트 추가
-        dialog.querySelectorAll('.promotion-piece').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const selectedPiece = btn.dataset.piece;
-                
-                // 이동된 위치의 폰을 삭제하고 승진한 말로 교체
-                this.board[row][col] = selectedPiece;
-                
-                // 승진 정보를 moveHistory에 추가
-                const lastMove = this.moveHistory[this.moveHistory.length - 1];
-                if (lastMove) {
-                    lastMove.special = 'promotion';
-                    lastMove.promotedPiece = selectedPiece;
-                    lastMove.promotedColor = color;
-                }
-                
-                dialog.remove();
-                this.renderBoard();
-                console.log(`${color} 폰이 ${pieceNames[pieces.indexOf(selectedPiece)]}로 승진했습니다!`);
-                
-                // 게임 상태 업데이트
-                this.updateGameStatus();
-                this.updateMoveHistory();
-                this.updateCapturedPieces();
-                
-                // 게임 종료 확인
-                this.checkGameEnd();
-                
-                // 온라인 모드라면 승진 완료 후 서버에 전송
-                if (this.gameMode === 'online-player') {
-                    this.sendMoveToGitHub();
-                }
-            });
-        });
+                        // 클릭 이벤트 추가
+                dialog.querySelectorAll('.promotion-piece').forEach(btn => {
+                    btn.addEventListener('click', () => {
+                        const selectedPiece = btn.dataset.piece;
+                        
+                        // 폰 이동과 승진을 완전히 처리
+                        if (fromRow !== null && fromCol !== null) {
+                            // 폰 이동
+                            const piece = this.board[fromRow][fromCol];
+                            this.board[row][col] = selectedPiece;
+                            this.board[fromRow][fromCol] = '';
+                            
+                            // moveHistory에 이동과 승진 정보 추가
+                            this.moveHistory.push({
+                                from: { row: fromRow, col: fromCol },
+                                to: { row: row, col: col },
+                                piece: piece,
+                                captured: '',
+                                special: 'promotion',
+                                promotedPiece: selectedPiece,
+                                promotedColor: color
+                            });
+                            
+                            // 턴 변경
+                            this.currentPlayer = this.currentPlayer === 'white' ? 'black' : 'white';
+                        } else {
+                            // fromRow/fromCol이 없는 경우 (온라인 모드 등) 단순히 승진만 처리
+                            const piece = this.board[row][col];
+                            this.board[row][col] = selectedPiece;
+                            
+                            // moveHistory에 승진 정보 추가
+                            this.moveHistory.push({
+                                from: { row: row, col: col },
+                                to: { row: row, col: col },
+                                piece: piece,
+                                captured: '',
+                                special: 'promotion',
+                                promotedPiece: selectedPiece,
+                                promotedColor: color
+                            });
+                            
+                            // 턴 변경
+                            this.currentPlayer = this.currentPlayer === 'white' ? 'black' : 'white';
+                        }
+                        
+                        dialog.remove();
+                        this.renderBoard();
+                        console.log(`${color} 폰이 ${pieceNames[pieces.indexOf(selectedPiece)]}로 승진했습니다!`);
+                        
+                        // 선택 해제 및 하이라이트 제거
+                        this.selectedPiece = null;
+                        this.clearHighlights();
+                        
+                        // 사운드 재생
+                        this.playPieceSound();
+                        
+                        // 게임 상태 업데이트
+                        this.updateGameStatus();
+                        this.updateMoveHistory();
+                        this.updateCapturedPieces();
+                        
+                        // 게임 종료 확인
+                        this.checkGameEnd();
+                        
+                        // 온라인 모드라면 승진 완료 후 서버에 전송
+                        if (this.gameMode === 'online-player') {
+                            this.sendMoveToGitHub();
+                        }
+                    });
+                });
     }
 
     // 캐슬링 이동인지 체크
@@ -3400,12 +3435,10 @@ if (colDiff === 1 && rowDiff === direction && targetPiece) {
             existingNotification.remove();
         }
         
-        // 새로운 알림 생성
+        // 중앙 팝업 알림 생성 (기존 방식)
         const notification = document.createElement('div');
         notification.className = `game-result-notification ${result.toLowerCase()}`;
         notification.textContent = result;
-        
-        // 스타일 적용
         notification.style.cssText = `
             position: fixed;
             top: 50%;
@@ -3422,15 +3455,29 @@ if (colDiff === 1 && rowDiff === direction && targetPiece) {
             box-shadow: 0 10px 30px rgba(0,0,0,0.5);
             border: 3px solid ${result === 'WIN!' ? '#4CAF50' : '#F44336'};
         `;
-        
         document.body.appendChild(notification);
-        
-        // 5초 후 제거 (더 오래 표시)
         setTimeout(() => {
             if (notification.parentNode) {
                 notification.remove();
             }
         }, 5000);
+
+        // 사이드 패널 결과 표시
+        const resultText = document.getElementById('result-text');
+        if (resultText) {
+            if (result === 'WIN!') {
+                resultText.textContent = 'WIN';
+                resultText.classList.remove('lose');
+                resultText.classList.add('win');
+            } else if (result === 'LOSE!') {
+                resultText.textContent = 'LOSE';
+                resultText.classList.remove('win');
+                resultText.classList.add('lose');
+            } else {
+                resultText.textContent = '';
+                resultText.classList.remove('win', 'lose');
+            }
+        }
     }
 
     // GitHub API 기반 온라인 플레이 메서드들
@@ -3530,9 +3577,18 @@ if (colDiff === 1 && rowDiff === direction && targetPiece) {
                         const promotionRow = lastMove.to.row;
                         const promotionCol = lastMove.to.col;
                         
-                        // 승진된 말로 직접 교체 (폰이 이미 이동된 상태에서 승진된 말로 교체)
-                        this.board[promotionRow][promotionCol] = lastMove.promotedPiece;
-                        console.log(`${lastMove.promotedColor} 폰 승진 처리: ${lastMove.promotedPiece}로 교체됨`);
+                        // 해당 위치에 해당 색의 폰이 있는지 확인
+                        const currentPiece = this.board[promotionRow][promotionCol];
+                        const expectedPawn = lastMove.promotedColor === 'white' ? '♙' : '♟';
+                        
+                        // 해당 색의 폰이 있는 경우에만 승진 처리
+                        if (currentPiece === expectedPawn) {
+                            this.board[promotionRow][promotionCol] = lastMove.promotedPiece;
+                            console.log(`${lastMove.promotedColor} 폰 승진: ${expectedPawn} → ${lastMove.promotedPiece}`);
+                        } else if (currentPiece !== lastMove.promotedPiece) {
+                            // 이미 승진된 말이 아닌 경우에만 처리 (안전장치)
+                            console.log(`승진 위치에 예상한 폰이 없음: ${currentPiece} (예상: ${expectedPawn})`);
+                        }
                     }
                 }
                 
