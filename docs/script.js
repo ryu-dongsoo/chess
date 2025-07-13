@@ -558,9 +558,10 @@ if (colDiff === 1 && rowDiff === direction && targetPiece) {
         
         // 폰 승진 확인 (킹을 잡지 않은 경우에만)
         if (this.isPawnPromotion(toRow, toCol, piece) && !this.isKingCaptured(this.currentPlayer === 'white' ? 'black' : 'white')) {
-            // 폰이 이미 이동된 상태에서 승진 다이얼로그 표시
+            // 폰 승진 시에는 승진 다이얼로그가 완료될 때까지 서버 전송을 하지 않음
+            // 승진 다이얼로그에서 승진 완료 후 sendMoveToGitHub()를 호출할 예정
             this.promotePawn(toRow, toCol);
-            return;
+            return; // 여기서 함수 종료, 서버 전송은 승진 완료 후에 수행
         }
         
         // 선택 해제 및 하이라이트 제거
@@ -578,7 +579,7 @@ if (colDiff === 1 && rowDiff === direction && targetPiece) {
         // 게임 종료 확인
         this.checkGameEnd();
 
-        // 온라인 모드라면 내 수를 저장/전송
+        // 온라인 모드라면 내 수를 저장/전송 (폰 승진이 아닌 경우에만)
         if (this.gameMode === 'online-player') {
             this.sendMoveToGitHub();
         }
@@ -3011,7 +3012,15 @@ if (colDiff === 1 && rowDiff === direction && targetPiece) {
                 this.renderBoard();
                 console.log(`${color} 폰이 ${pieceNames[pieces.indexOf(selectedPiece)]}로 승진했습니다!`);
                 
-                // 온라인 모드라면 승진 정보를 전송
+                // 게임 상태 업데이트
+                this.updateGameStatus();
+                this.updateMoveHistory();
+                this.updateCapturedPieces();
+                
+                // 게임 종료 확인
+                this.checkGameEnd();
+                
+                // 온라인 모드라면 승진 완료 후 서버에 전송
                 if (this.gameMode === 'online-player') {
                     this.sendMoveToGitHub();
                 }
@@ -3521,14 +3530,9 @@ if (colDiff === 1 && rowDiff === direction && targetPiece) {
                         const promotionRow = lastMove.to.row;
                         const promotionCol = lastMove.to.col;
                         
-                        // 해당 색의 폰만 승진된 말로 교체
-                        const expectedPawn = lastMove.promotedColor === 'white' ? '♙' : '♟';
-                        const currentPiece = this.board[promotionRow][promotionCol];
-                        
-                        if (currentPiece === expectedPawn) {
-                            this.board[promotionRow][promotionCol] = lastMove.promotedPiece;
-                            console.log(`${lastMove.promotedColor} 폰 승진: ${currentPiece} → ${lastMove.promotedPiece}`);
-                        }
+                        // 승진된 말로 직접 교체 (폰이 이미 이동된 상태에서 승진된 말로 교체)
+                        this.board[promotionRow][promotionCol] = lastMove.promotedPiece;
+                        console.log(`${lastMove.promotedColor} 폰 승진 처리: ${lastMove.promotedPiece}로 교체됨`);
                     }
                 }
                 
